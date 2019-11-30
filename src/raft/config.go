@@ -236,7 +236,7 @@ func (cfg *config) connect(i int) {
 	// fmt.Printf("connect(%d)\n", i)
 
 	cfg.connected[i] = true
-
+	DPrintf("server %d connect", i)
 	// outgoing ClientEnds
 	for j := 0; j < cfg.n; j++ {
 		if cfg.connected[j] {
@@ -259,7 +259,7 @@ func (cfg *config) disconnect(i int) {
 	// fmt.Printf("disconnect(%d)\n", i)
 
 	cfg.connected[i] = false
-
+	DPrintf("server %d disconnect", i)
 	// outgoing ClientEnds
 	for j := 0; j < cfg.n; j++ {
 		if cfg.endnames[i] != nil {
