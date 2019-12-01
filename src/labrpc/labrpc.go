@@ -59,6 +59,8 @@ import "math/rand"
 import "time"
 import "sync/atomic"
 
+//import "fmt"
+
 type reqMsg struct {
 	endname  interface{} // name of sending ClientEnd
 	svcMeth  string      // e.g. "Raft.AppendEntries"
@@ -95,8 +97,10 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 
 	select {
 	case e.ch <- req:
+
 		// ok
 	case <-e.done:
+		//fmt.Println("Failure first place")
 		return false
 	}
 
@@ -109,6 +113,7 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 		}
 		return true
 	} else {
+		//fmt.Println("Failure second place")
 		return false
 	}
 }
