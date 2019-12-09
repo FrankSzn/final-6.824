@@ -137,7 +137,7 @@ type Raft struct {
 	//commitCh chan interface{}
 
 	// ApplyCh for ApplyMsg
-	ApplyCh chan ApplyMsg
+	applyCh chan ApplyMsg
 
 	// 当候选人赢得了选举就会利用这个通道传送信息
 	//leaderCh chan interface{}
@@ -466,6 +466,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	if isLeader {
 		rf.mu.Lock()
+		defer rf.mu.Unlock()
 		index = len(rf.log)
 		rf.log = append(rf.log, LogEntry{LogTerm: term, Command: command})
 
@@ -477,8 +478,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			DPrintf("Something happen here")
 
 		*/
+
 		rf.persist()
-		rf.mu.Unlock()
+		rf.broadcastAppendEntries()
+
 	}
 
 	return index, term, isLeader
@@ -639,25 +642,35 @@ func (rf *Raft) broadcastAppendEntries() {
 				ok := rf.sendAppendEntries(idx, &args, &reply)
 				if !ok {
 					rf.mu.Lock()
-					DPrintf("something wrong here, for server[%d]", idx)
+					DPrintf("something wrong here, for server[%d], the sender is server[%d]", idx, rf.me)
 					//DPrintf("server[%d]'s sendAppendEntries from [%d] in [%d] term failure, reply the term [%d]", idx, rf.me, rf.currentTerm, reply.Term)
 					rf.mu.Unlock()
 					return
 				}
 				// 比较leader的term是否过时
 				rf.mu.Lock()
+				if reply.Term < rf.currentTerm || rf.state != LEADER {
+					rf.mu.Unlock()
+					return
+				}
 				// DPrintf("send AppendEntries from server[%d] to [%d]", rf.me, idx)
-				if reply.Term > rf.currentTerm && rf.state == LEADER {
+				if reply.Term > rf.currentTerm {
 
 					rf.currentTerm = reply.Term
 					DPrintf("Leader server outdated")
 					rf.votedFor = -1
-					rf.heartbeatTimer.Stop()
+					if rf.state == LEADER {
+						rf.heartbeatTimer.Stop()
+					}
+
 					rf.convertTo(FOLLOWER)
 					rf.persist()
 					DPrintf("Leader outdated cannot be ")
+					rf.mu.Unlock()
+					return
 
 				}
+
 				//DPrintf("whether [%d] come here, reply.Term is[%d], currentTerm is[%d]", rf.me, reply.Term, rf.currentTerm)
 				if reply.Term == rf.currentTerm && rf.state == LEADER {
 					DPrintf("server [%d] come on", idx)
@@ -681,7 +694,7 @@ func (rf *Raft) broadcastAppendEntries() {
 						// 成功匹配
 						rf.matchIndex[idx] = args.PrevLogIndex + len(args.Entries)
 						rf.nextIndex[idx] = rf.matchIndex[idx] + 1
-
+						DPrintf("leader is server[%d], his commit is %d", args.LeaderId, args.LeaderCommit)
 						rf.updateLastCommit()
 					}
 
@@ -727,12 +740,22 @@ func (rf *Raft) broadcastRequestVote() {
 		}
 
 		go func(idx int) {
+			rf.mu.Lock()
+			if rf.state != CANDIDATE {
+				rf.mu.Unlock()
+				return
+			}
+			rf.mu.Unlock()
 			// reply := &RequestVoteReply{}
 			var reply RequestVoteReply
 			if rf.sendRequestVote(idx, &args, &reply) {
 				rf.mu.Lock()
+				if reply.Term < rf.currentTerm {
+					rf.mu.Unlock()
+					return
+				}
 
-				if reply.VoteGranted && rf.state == CANDIDATE {
+				if reply.VoteGranted && rf.state == CANDIDATE && reply.Term == rf.currentTerm {
 					atomic.AddInt32(&voteAcquired, 1)
 					if atomic.LoadInt32(&voteAcquired) > int32(len(rf.peers)/2) {
 						rf.electionTimer.Stop()
@@ -758,6 +781,7 @@ func (rf *Raft) broadcastRequestVote() {
 						// Here we need to set the candidate's vote to null
 
 					}
+
 				}
 				rf.mu.Unlock()
 			} else {
@@ -826,7 +850,7 @@ func (rf *Raft) updateLastApplied() {
 		command := rf.log[rf.lastApplied].Command
 		applyMsg := ApplyMsg{true, command, rf.lastApplied}
 		DPrintf("updateLastApplied, server[%d]", rf.me)
-		rf.ApplyCh <- applyMsg
+		rf.applyCh <- applyMsg
 		DPrintf("final apply from server[%d]", rf.me)
 	}
 
@@ -835,6 +859,7 @@ func (rf *Raft) updateLastApplied() {
 // If there exists an N such that N > commitIndex, a majority
 // of matchIndex[i] >= N, and log[N].term == currentTerm: set commitIndex = N
 func (rf *Raft) updateLastCommit() {
+
 	matchIndexCopy := make([]int, len(rf.matchIndex))
 	copy(matchIndexCopy, rf.matchIndex)
 	for i := range rf.matchIndex {
@@ -846,10 +871,13 @@ func (rf *Raft) updateLastCommit() {
 	for i := range rf.log {
 		DPrintf("server[%d] %v", rf.me, rf.log[i])
 	}
-
+	for i := range rf.matchIndex {
+		DPrintf("server[%d]'s matchindex is %v", i, rf.matchIndex[i])
+	}
 	// Check
 	N = Min(N, rf.getLastIndex())
-	if N > rf.commitIndex && rf.log[N].LogTerm == rf.currentTerm {
+	// add raft state is leader test for unreliable 2C figure8 test
+	if N > rf.commitIndex && rf.log[N].LogTerm == rf.currentTerm && rf.state == LEADER {
 		rf.commitIndex = N
 		DPrintf("updateLastCommit from server[%d]", rf.me)
 		rf.updateLastApplied()
@@ -927,7 +955,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	}
 	rf.matchIndex = make([]int, len(peers))
 
-	rf.ApplyCh = applyCh
+	rf.applyCh = applyCh
 
 	rf.lastApplied = 0
 	rf.commitIndex = 0
