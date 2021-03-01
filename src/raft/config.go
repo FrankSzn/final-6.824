@@ -297,7 +297,7 @@ func (cfg *config) setlongreordering(longrel bool) {
 // try a few times in case re-elections are needed.
 func (cfg *config) checkOneLeader() int {
 	for iters := 0; iters < 10; iters++ {
-		ms := 450 + (rand.Int63() % 100)
+		ms := 450 + (rand.Int63() % 100) // 450 - 550
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
 		leaders := make(map[int][]int)
@@ -360,6 +360,7 @@ func (cfg *config) nCommitted(index int) (int, interface{}) {
 	count := 0
 	cmd := -1
 	for i := 0; i < len(cfg.rafts); i++ {
+
 		if cfg.applyErr[i] != "" {
 			cfg.t.Fatal(cfg.applyErr[i])
 		}
@@ -370,6 +371,7 @@ func (cfg *config) nCommitted(index int) (int, interface{}) {
 
 		if ok {
 			if count > 0 && cmd != cmd1 {
+				DPrintf("it is the server %v, which has not match problem\n", i);
 				cfg.t.Fatalf("committed values do not match: index %v, %v, %v\n",
 					index, cmd, cmd1)
 			}
@@ -438,7 +440,7 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 			}
 			cfg.mu.Unlock()
 			if rf != nil {
-				index1, _, ok := rf.Start(cmd)
+				index1, _, ok := rf.Start(cmd) // return index, term, leader
 				if ok {
 					index = index1
 					break

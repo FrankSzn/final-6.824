@@ -8,12 +8,14 @@ package raft
 // test with the original before submitting.
 //
 
-import "testing"
-import "fmt"
-import "time"
-import "math/rand"
-import "sync/atomic"
-import "sync"
+import (
+	"fmt"
+	"math/rand"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
@@ -351,20 +353,35 @@ func TestBackup2B(t *testing.T) {
 	cfg.disconnect((leader1 + 3) % servers)
 	cfg.disconnect((leader1 + 4) % servers)
 
+	DPrintf("testBackup period 1, put leader and one follower in a partition")
+
+	DPrintf("server[%d] disconnect", (leader1+2)%servers)
+	DPrintf("server[%d] disconnect", (leader1+3)%servers)
+	DPrintf("server[%d] disconnect", (leader1+4)%servers)
 	// submit lots of commands that won't commit
+
+	DPrintf("testBackup period 2, submit lots of commands that won't commit")
 	for i := 0; i < 50; i++ {
 		cfg.rafts[leader1].Start(rand.Int())
 	}
 
-	time.Sleep(RaftElectionTimeout / 2)
+	time.Sleep(RaftElectionTimeout / 2) // 500ms
 
 	cfg.disconnect((leader1 + 0) % servers)
 	cfg.disconnect((leader1 + 1) % servers)
-
+	DPrintf("testBackup period 3, disconnect the leaving leader and follower")
+	DPrintf("server[%d] disconnect", (leader1+0)%servers)
+	DPrintf("server[%d] disconnect", (leader1+1)%servers)
 	// allow other partition to recover
+
 	cfg.connect((leader1 + 2) % servers)
 	cfg.connect((leader1 + 3) % servers)
 	cfg.connect((leader1 + 4) % servers)
+
+	DPrintf("testBackup period 4, allow other partition to recover")
+	DPrintf("server[%d] connect", (leader1+2)%servers)
+	DPrintf("server[%d] connect", (leader1+3)%servers)
+	DPrintf("server[%d] connect", (leader1+4)%servers)
 
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
@@ -377,32 +394,47 @@ func TestBackup2B(t *testing.T) {
 	if leader2 == other {
 		other = (leader2 + 1) % servers
 	}
+	DPrintf("testBackup period 5, now another partitioned leader and one follower")
 	cfg.disconnect(other)
-
+	DPrintf(" 'other' server[%d] disconnect", other%servers)
 	// lots more commands that won't commit
 	for i := 0; i < 50; i++ {
 		cfg.rafts[leader2].Start(rand.Int())
 	}
-
-	time.Sleep(RaftElectionTimeout / 2)
+	DPrintf("testBackup period 6, another partition recover and the leader2 of it commit lost of command")
+	time.Sleep(RaftElectionTimeout / 2) // 500ms
 
 	// bring original leader back to life,
 	for i := 0; i < servers; i++ {
 		cfg.disconnect(i)
+		DPrintf("server[%d] disconnect", i%servers)
 	}
+	DPrintf("Disconnect all server")
+	DPrintf("testBackup period 7, bring original leader back to life")
 	cfg.connect((leader1 + 0) % servers)
 	cfg.connect((leader1 + 1) % servers)
 	cfg.connect(other)
 
+	DPrintf("server[%d] connect", (leader1+0)%servers)
+	DPrintf("server[%d] connect", (leader1+1)%servers)
+	DPrintf(" 'other' server[%d] connect", other)
+
+	DPrintf("original leader is %v\n", leader1)
+	DPrintf("new leader is %v\n", leader2)
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
 		cfg.one(rand.Int(), 3, true)
 	}
 
 	// now everyone
+
 	for i := 0; i < servers; i++ {
 		cfg.connect(i)
+		DPrintf("server[%d] connect", i%servers)
 	}
+	DPrintf("testBackup period 8, now connect all servers")
+	DPrintf("original leader is %v\n", leader1)
+	DPrintf("new leader is %v\n", leader2)
 	cfg.one(rand.Int(), servers, true)
 
 	cfg.end()

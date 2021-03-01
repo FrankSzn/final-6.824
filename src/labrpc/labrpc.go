@@ -124,7 +124,7 @@ type Network struct {
 	longDelays     bool                        // pause a long time on send on disabled connection
 	longReordering bool                        // sometimes delay replies a long time
 	ends           map[interface{}]*ClientEnd  // ends, by name
-	enabled        map[interface{}]bool        // by end name
+	enabled        map[interface{}]bool        // by end name 网络可用吗
 	servers        map[interface{}]*Server     // servers, by name
 	connections    map[interface{}]interface{} // endname -> servername
 	endCh          chan reqMsg
@@ -216,11 +216,11 @@ func (rn *Network) ProcessReq(req reqMsg) {
 		if reliable == false {
 			// short delay
 			ms := (rand.Int() % 27)
-			time.Sleep(time.Duration(ms) * time.Millisecond)
+			time.Sleep(time.Duration(ms) * time.Millisecond) // 0-27ms 对于unreliable 网络
 		}
 
 		if reliable == false && (rand.Int()%1000) < 100 {
-			// drop the request, return as if timeout
+			// drop the request, return as if timeout ， 百分之十的概率会丢信息
 			req.replyCh <- replyMsg{false, nil}
 			return
 		}
@@ -245,7 +245,7 @@ func (rn *Network) ProcessReq(req reqMsg) {
 			select {
 			case reply = <-ech:
 				replyOK = true
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(100 * time.Millisecond): // 100 ms  因此最多只允许10次选举/
 				serverDead = rn.IsServerDead(req.endname, servername, server)
 				if serverDead {
 					go func() {
@@ -267,11 +267,11 @@ func (rn *Network) ProcessReq(req reqMsg) {
 			// server was killed while we were waiting; return error.
 			req.replyCh <- replyMsg{false, nil}
 		} else if reliable == false && (rand.Int()%1000) < 100 {
-			// drop the reply, return as if timeout
+			// drop the reply, return as if timeout // 十分之一概率会挂在不可靠网络中
 			req.replyCh <- replyMsg{false, nil}
-		} else if longreordering == true && rand.Intn(900) < 600 {
+		} else if longreordering == true && rand.Intn(900) < 600 { // 如果有较长时间的reordering， 有三分之二的概率会发生下面的事情
 			// delay the response for a while
-			ms := 200 + rand.Intn(1+rand.Intn(2000))
+			ms := 200 + rand.Intn(1+rand.Intn(2000)) // [200, 2200]ms延迟
 			// Russ points out that this timer arrangement will decrease
 			// the number of goroutines, so that the race
 			// detector is less likely to get upset.
@@ -287,11 +287,11 @@ func (rn *Network) ProcessReq(req reqMsg) {
 		if rn.longDelays {
 			// let Raft tests check that leader doesn't send
 			// RPCs synchronously.
-			ms = (rand.Int() % 7000)
+			ms = (rand.Int() % 7000) // 0-7s
 		} else {
 			// many kv tests require the client to try each
 			// server in fairly rapid succession.
-			ms = (rand.Int() % 100)
+			ms = (rand.Int() % 100) // 0-100ms
 		}
 		time.AfterFunc(time.Duration(ms)*time.Millisecond, func() {
 			req.replyCh <- replyMsg{false, nil}
