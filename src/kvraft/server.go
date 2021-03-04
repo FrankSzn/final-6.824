@@ -42,6 +42,9 @@ type KVServer struct {
 	db     map[string]string
 	result map[int]chan Op
 	ack    map[int64]int
+
+	//
+	closeCh chan struct{}
 }
 
 func (kv *KVServer) waitForResult(op Op, timeout time.Duration) bool {
@@ -135,6 +138,9 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 func (kv *KVServer) Kill() {
 	kv.rf.Kill()
 	// Your code here, if desired.
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	close(kv.closeCh)
 }
 
 //helper function
@@ -188,6 +194,8 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.db = make(map[string]string)
 	kv.result = make(map[int]chan Op)
 	kv.ack = make(map[int64]int)
+
+	kv.closeCh = make(chan struct{})
 
 	go func() {
 		for msg := range kv.applyCh {

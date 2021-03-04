@@ -1,0 +1,9 @@
+testing: warning: no tests to run
+PASS
+ok  	kvraft	0.048s
+testing: warning: no tests to run
+PASS
+ok  	kvraft	0.049s
+testing: warning: no tests to run
+PASS
+ok  	kvraft	0.042s

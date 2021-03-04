@@ -778,6 +778,7 @@ func TestFigure8Unreliable2C(t *testing.T) {
 
 	nup := servers
 	for iters := 0; iters < 1000; iters++ {
+		DPrintf("Figure8Unreliable2C进入第[%v]轮\n", iters)
 		if iters == 200 {
 			cfg.setlongreordering(true)
 		}
@@ -786,23 +787,25 @@ func TestFigure8Unreliable2C(t *testing.T) {
 			_, _, ok := cfg.rafts[i].Start(rand.Int() % 10000)
 			if ok && cfg.connected[i] {
 				leader = i
+				DPrintf("found the leader[%v] in the iteration[%v]\n", leader, iters)
 			}
 		}
 
-		if (rand.Int() % 1000) < 100 {
-			ms := rand.Int63() % (int64(RaftElectionTimeout/time.Millisecond) / 2)
+		if (rand.Int() % 1000) < 100 { // 10分之1的概率他会去睡[0,500]ms
+			ms := rand.Int63() % (int64(RaftElectionTimeout/time.Millisecond) / 2) // 0-500ms
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 		} else {
-			ms := (rand.Int63() % 13)
+			ms := (rand.Int63() % 13) // 10分之9的概率他会去睡[0-13]ms
 			time.Sleep(time.Duration(ms) * time.Millisecond)
 		}
 
-		if leader != -1 && (rand.Int()%1000) < int(RaftElectionTimeout/time.Millisecond)/2 {
+		if leader != -1 && (rand.Int()%1000) < int(RaftElectionTimeout/time.Millisecond)/2 { // 2分之1的概率去断开leader
+			DPrintf("leader[%v] disconnect\n", leader)
 			cfg.disconnect(leader)
 			nup -= 1
 		}
 
-		if nup < 3 {
+		if nup < 3 { // 当服务器小于一半时, 有一定概率恢复一个
 			s := rand.Int() % servers
 			if cfg.connected[s] == false {
 				cfg.connect(s)
@@ -810,7 +813,7 @@ func TestFigure8Unreliable2C(t *testing.T) {
 			}
 		}
 	}
-
+	// 最后把所有服务器恢复
 	for i := 0; i < servers; i++ {
 		if cfg.connected[i] == false {
 			cfg.connect(i)

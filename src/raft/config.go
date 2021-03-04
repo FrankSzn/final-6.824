@@ -440,9 +440,11 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 			}
 			cfg.mu.Unlock()
 			if rf != nil {
-				index1, _, ok := rf.Start(cmd) // return index, term, leader
+				index1, term1, ok := rf.Start(cmd) // return index, term, leader
 				if ok {
 					index = index1
+					DPrintf("the state machine start to give the command[%v], at the index[%v], its term is [%v], " +
+						"theleader is server[%v] ", cmd, index1, term1, starts)
 					break
 				}
 			}
