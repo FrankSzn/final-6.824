@@ -49,17 +49,20 @@ package labrpc
 //   pass svc to srv.AddService()
 //
 
-import "labgob"
-import "bytes"
-import "reflect"
-import "sync"
-import "log"
-import "strings"
-import "math/rand"
-import "time"
-import "sync/atomic"
+import (
+	// "fmt"
+	"bytes"
+	"labgob"
+	"log"
+	"math/rand"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+)
 
-//import "fmt"
+// import "fmt"
 
 type reqMsg struct {
 	endname  interface{} // name of sending ClientEnd
@@ -84,6 +87,7 @@ type ClientEnd struct {
 // the return value indicates success; false means that
 // no reply was received from the server.
 func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bool {
+	// t1 := time.Now()
 	req := reqMsg{}
 	req.endname = e.endname
 	req.svcMeth = svcMeth
@@ -95,15 +99,20 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 	qe.Encode(args)
 	req.args = qb.Bytes()
 
+	//
+	// send the request.
+	//
 	select {
 	case e.ch <- req:
-
-		// ok
+		// the request has been sent.
 	case <-e.done:
-		//fmt.Println("Failure first place")
+		// entire Network has been destroyed.
 		return false
 	}
 
+	//
+	// wait for the reply.
+	//
 	rep := <-req.replyCh
 	if rep.ok {
 		rb := bytes.NewBuffer(rep.reply)
@@ -111,9 +120,9 @@ func (e *ClientEnd) Call(svcMeth string, args interface{}, reply interface{}) bo
 		if err := rd.Decode(reply); err != nil {
 			log.Fatalf("ClientEnd.Call(): decode reply: %v\n", err)
 		}
+		// fmt.Printf("the method[%v] 持续了%v ms, 并且成功返回\n", svcMeth, time.Now().Sub(t1))
 		return true
 	} else {
-		//fmt.Println("Failure second place")
 		return false
 	}
 }
@@ -124,12 +133,13 @@ type Network struct {
 	longDelays     bool                        // pause a long time on send on disabled connection
 	longReordering bool                        // sometimes delay replies a long time
 	ends           map[interface{}]*ClientEnd  // ends, by name
-	enabled        map[interface{}]bool        // by end name 网络可用吗
+	enabled        map[interface{}]bool        // by end name
 	servers        map[interface{}]*Server     // servers, by name
 	connections    map[interface{}]interface{} // endname -> servername
 	endCh          chan reqMsg
 	done           chan struct{} // closed when Network is cleaned up
 	count          int32         // total RPC count, for statistics
+	bytes          int64         // total bytes send, for statistics
 }
 
 func MakeNetwork() *Network {
@@ -148,7 +158,8 @@ func MakeNetwork() *Network {
 			select {
 			case xreq := <-rn.endCh:
 				atomic.AddInt32(&rn.count, 1)
-				go rn.ProcessReq(xreq)
+				atomic.AddInt64(&rn.bytes, int64(len(xreq.args)))
+				go rn.processReq(xreq)
 			case <-rn.done:
 				return
 			}
@@ -183,7 +194,7 @@ func (rn *Network) LongDelays(yes bool) {
 	rn.longDelays = yes
 }
 
-func (rn *Network) ReadEndnameInfo(endname interface{}) (enabled bool,
+func (rn *Network) readEndnameInfo(endname interface{}) (enabled bool,
 	servername interface{}, server *Server, reliable bool, longreordering bool,
 ) {
 	rn.mu.Lock()
@@ -199,7 +210,7 @@ func (rn *Network) ReadEndnameInfo(endname interface{}) (enabled bool,
 	return
 }
 
-func (rn *Network) IsServerDead(endname interface{}, servername interface{}, server *Server) bool {
+func (rn *Network) isServerDead(endname interface{}, servername interface{}, server *Server) bool {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 
@@ -209,18 +220,18 @@ func (rn *Network) IsServerDead(endname interface{}, servername interface{}, ser
 	return false
 }
 
-func (rn *Network) ProcessReq(req reqMsg) {
-	enabled, servername, server, reliable, longreordering := rn.ReadEndnameInfo(req.endname)
+func (rn *Network) processReq(req reqMsg) {
+	enabled, servername, server, reliable, longreordering := rn.readEndnameInfo(req.endname)
 
 	if enabled && servername != nil && server != nil {
 		if reliable == false {
 			// short delay
 			ms := (rand.Int() % 27)
-			time.Sleep(time.Duration(ms) * time.Millisecond) // 0-27ms 对于unreliable 网络
+			time.Sleep(time.Duration(ms) * time.Millisecond)
 		}
 
 		if reliable == false && (rand.Int()%1000) < 100 {
-			// drop the request, return as if timeout ， 百分之十的概率会丢信息
+			// drop the request, return as if timeout
 			req.replyCh <- replyMsg{false, nil}
 			return
 		}
@@ -245,8 +256,8 @@ func (rn *Network) ProcessReq(req reqMsg) {
 			select {
 			case reply = <-ech:
 				replyOK = true
-			case <-time.After(100 * time.Millisecond): // 100 ms  因此最多只允许10次选举/
-				serverDead = rn.IsServerDead(req.endname, servername, server)
+			case <-time.After(100 * time.Millisecond):
+				serverDead = rn.isServerDead(req.endname, servername, server)
 				if serverDead {
 					go func() {
 						<-ech // drain channel to let the goroutine created earlier terminate
@@ -261,24 +272,26 @@ func (rn *Network) ProcessReq(req reqMsg) {
 		// to an Append, but the server persisted the update
 		// into the old Persister. config.go is careful to call
 		// DeleteServer() before superseding the Persister.
-		serverDead = rn.IsServerDead(req.endname, servername, server)
+		serverDead = rn.isServerDead(req.endname, servername, server)
 
 		if replyOK == false || serverDead == true {
 			// server was killed while we were waiting; return error.
 			req.replyCh <- replyMsg{false, nil}
 		} else if reliable == false && (rand.Int()%1000) < 100 {
-			// drop the reply, return as if timeout // 十分之一概率会挂在不可靠网络中
+			// drop the reply, return as if timeout
 			req.replyCh <- replyMsg{false, nil}
-		} else if longreordering == true && rand.Intn(900) < 600 { // 如果有较长时间的reordering， 有三分之二的概率会发生下面的事情
+		} else if longreordering == true && rand.Intn(900) < 600 {
 			// delay the response for a while
-			ms := 200 + rand.Intn(1+rand.Intn(2000)) // [200, 2200]ms延迟
+			ms := 200 + rand.Intn(1+rand.Intn(2000))
 			// Russ points out that this timer arrangement will decrease
 			// the number of goroutines, so that the race
 			// detector is less likely to get upset.
 			time.AfterFunc(time.Duration(ms)*time.Millisecond, func() {
+				atomic.AddInt64(&rn.bytes, int64(len(reply.reply)))
 				req.replyCh <- reply
 			})
 		} else {
+			atomic.AddInt64(&rn.bytes, int64(len(reply.reply)))
 			req.replyCh <- reply
 		}
 	} else {
@@ -287,11 +300,11 @@ func (rn *Network) ProcessReq(req reqMsg) {
 		if rn.longDelays {
 			// let Raft tests check that leader doesn't send
 			// RPCs synchronously.
-			ms = (rand.Int() % 7000) // 0-7s
+			ms = (rand.Int() % 7000)
 		} else {
 			// many kv tests require the client to try each
 			// server in fairly rapid succession.
-			ms = (rand.Int() % 100) // 0-100ms
+			ms = (rand.Int() % 100)
 		}
 		time.AfterFunc(time.Duration(ms)*time.Millisecond, func() {
 			req.replyCh <- replyMsg{false, nil}
@@ -364,6 +377,11 @@ func (rn *Network) GetCount(servername interface{}) int {
 func (rn *Network) GetTotalCount() int {
 	x := atomic.LoadInt32(&rn.count)
 	return int(x)
+}
+
+func (rn *Network) GetTotalBytes() int64 {
+	x := atomic.LoadInt64(&rn.bytes)
+	return x
 }
 
 //
