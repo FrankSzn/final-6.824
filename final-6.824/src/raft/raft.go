@@ -18,10 +18,10 @@ package raft
 //
 
 import (
-	"bytes"
-	"fmt"
 	"labgob"
 	"labrpc"
+	"bytes"
+	"fmt"
 	"math/rand"
 	"os"
 	"sort"
@@ -1046,10 +1046,16 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go func() {
 
 		for !rf.killed() {
-			select {
 
+			select {
 			case <-rf.electionTimer.C:
 				rf.lock("electionTimer")
+
+				if rf.state == LEADER {
+					rf.unlock("electionTimer1")
+					break
+				}
+
 				if rf.state == FOLLOWER || rf.state == CANDIDATE {
 					//DPrintf("ElectionTimer time out")
 					rf.convertTo(CANDIDATE)
@@ -1065,6 +1071,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 			case <-rf.heartbeatTimer.C:
 				rf.lock("heartbeatTimer")
+
 				if rf.state == LEADER {
 					// rf.heartbeatTimer.Stop()
 					rf.stop(rf.heartbeatTimer)
